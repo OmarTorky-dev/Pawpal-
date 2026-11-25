@@ -10,13 +10,23 @@
 
 **a. Initial design**
 
-- Briefly describe your initial UML design.
-- What classes did you include, and what responsibilities did you assign to each?
+My initial UML has four classes with a simple ownership chain: an `Owner` has many `Pet`s, each `Pet` has many `Task`s, and a `Scheduler` reads everything through the `Owner`.
+
+- **Task** (dataclass) – one care activity: description, time (`"HH:MM"`), duration, priority, frequency (`once`/`daily`/`weekly`), due date, and completion status. It can mark itself complete and produce its next occurrence if it recurs.
+- **Pet** (dataclass) – a pet's details (name, species, age) plus its own list of tasks; it adds, removes, and returns its tasks.
+- **Owner** – the person using the app: name, how many minutes they have for pet care per day, and their pets. It adds/looks up pets and gathers every task across all pets.
+- **Scheduler** – the "brain." It holds a reference to the `Owner` (not a copy of the tasks) and is responsible for everything that spans pets: today's tasks, sorting by time, filtering by pet/status, conflict detection, completing tasks (including rolling recurring ones forward), and generating a plan that fits the owner's available time.
+
+I kept `Task` and `Pet` as dataclasses because they are mostly data, and made `Owner` and `Scheduler` regular classes because they are mostly behavior.
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes — after asking the AI to review the skeleton for missing relationships and bottlenecks, I made two changes:
+
+1. **Added `pet_name` to `Task`.** In the first skeleton a task had no link back to its pet. Since `Owner.get_all_tasks()` flattens everything into one list, the Scheduler couldn't say which pet a task or conflict belonged to without nested loops everywhere. `Pet.add_task()` now stamps the pet's name onto the task.
+2. **Added `Task.__post_init__` to normalize times.** Times are stored as `"HH:MM"` strings so they're easy to read and type, but `"9:00"` sorts *after* `"10:00"` as a string. Normalizing every time to zero-padded `HH:MM` when the task is created means plain string sorting is also chronological sorting, and bad input fails early.
+
+One suggestion I did *not* take: making `Task` hold a full reference to its `Pet` object. That creates a circular reference (Pet → Task → Pet) that makes the dataclasses harder to print and compare; a pet name is all the Scheduler actually needs.
 
 ---
 

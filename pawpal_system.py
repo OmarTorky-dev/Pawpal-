@@ -15,6 +15,10 @@ class Task:
     frequency: str = "once"  # "once" | "daily" | "weekly"
     due_date: date = field(default_factory=date.today)
     completed: bool = False
+    pet_name: str = ""  # set by Pet.add_task so the Scheduler knows who the task is for
+
+    def __post_init__(self) -> None:
+        pass
 
     def mark_complete(self) -> None:
         pass
