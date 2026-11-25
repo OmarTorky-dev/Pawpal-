@@ -110,19 +110,41 @@ Today's Plan (fits in 60 min)
 
 ## 🧪 Testing PawPal+
 
-```bash
-# Run the full test suite:
-pytest
+Run the full suite from the project root:
 
-# Run with coverage:
-pytest --cov
+```bash
+python -m pytest
 ```
+
+`tests/test_pawpal.py` contains **38 tests** covering both happy paths and edge cases:
+
+| Area | What's verified |
+|------|-----------------|
+| Basics | `mark_complete()` flips status; `add_task()` grows a pet's list and tags the pet name; removing tasks; owners aggregate tasks across pets; duplicate pet names are rejected |
+| Validation | Times normalize to `HH:MM` (`"7:05"` → `"07:05"`); bad times (`"25:00"`, `"noon"`, `""`), priorities, frequencies and zero durations raise `ValueError` |
+| Sorting | Out-of-order tasks come back chronologically; `"9:00"` sorts before `"10:00"`; ties broken by priority; tomorrow sorts after today; empty list |
+| Recurrence | Completing a daily task creates one for the next day (weekly → +7 days); one-off tasks don't recur; month, year and leap-day boundaries; completing twice rolls forward twice; unknown pet/task returns `None` |
+| Conflicts | Exact same time is flagged; overlapping durations are flagged; back-to-back tasks are *not*; completed tasks and tasks on different days are ignored; no tasks → no warnings |
+| Filtering / today | Pet filter is case-insensitive; status filter and combined filters; a pet with no tasks; overdue pending tasks show today, old completed ones don't |
+| Planning | Plan stays within the time budget and prefers high priority; explanations mention skipped tasks; empty day and zero-minute budget |
+
+To check the tests actually catch bugs (not just pass), I temporarily broke three pieces of logic — conflict boundary (`<` → `<=`), recurrence date (no `+ timedelta`), and the sort key — and each change made the relevant tests fail.
 
 Sample test output:
 
 ```
-# Paste your pytest output here
+============================= test session starts =============================
+platform win32 -- Python 3.15.2, pytest-9.2.0, pluggy-1.7.0
+rootdir: C:\Users\omart\OneDrive\Desktop\Pawpal-\ai110-module2show-pawpal-starter
+plugins: anyio-4.16.0
+collected 38 items
+
+tests\test_pawpal.py ......................................              [100%]
+
+============================= 38 passed in 0.09s ==============================
 ```
+
+**Confidence level: ★★★★☆ (4/5)** — every core scheduling behavior and the edge cases I could think of are covered and passing, and the suite catches deliberately injected bugs. One star held back because the Streamlit UI is only checked manually / with a smoke test, and real-world inputs like time zones or tasks that cross midnight aren't handled yet.
 
 ## 📐 Smarter Scheduling
 

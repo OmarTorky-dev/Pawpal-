@@ -71,13 +71,19 @@ A second, smaller tradeoff: the planner is **greedy** (highest priority first, s
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+The suite (38 tests) covers: task completion and addition, input validation, sorting (including the `"9:00"` vs `"10:00"` string trap and priority tie-breaks), recurrence (daily/weekly, one-off tasks, month/year/leap-day boundaries), conflict detection (exact matches, overlapping durations, back-to-back tasks that should *not* conflict, completed tasks, different days), filtering, "today" view with overdue tasks, and plan generation within a time budget.
+
+These mattered because they're the behaviors an owner relies on without double-checking: if recurrence silently stopped creating tomorrow's medication, or sorting put 10:00 before 9:00, the app would look fine but give wrong advice. The boundary tests (back-to-back tasks, Dec 31 → Jan 1) are where off-by-one bugs usually hide.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+About **4 out of 5**. All 38 tests pass, and I checked that the tests have teeth by deliberately breaking the conflict boundary, the recurrence date math, and the sort key — each broke the matching tests. I'm holding back one point because the Streamlit UI is only smoke-tested.
+
+Next edge cases I'd test:
+- Tasks that cross midnight (e.g. 23:30 for 60 minutes) — currently they can't conflict with a 00:15 task the next day.
+- Two pending tasks with the same description for the same pet (which one does `mark_task_complete` pick?).
+- Completing a recurring task that's several days overdue — right now the next occurrence is based on the old due date, so it may still be in the past.
+- Very large numbers of tasks, to confirm the O(n²) conflict check stays fast enough.
 
 ---
 
