@@ -2,6 +2,12 @@
 
 ## 1. System Design
 
+**Core user actions**
+
+1. **Add a pet** – The owner enters a pet's name, species, and age so PawPal+ can track care for it.
+2. **Schedule a care task** – The owner adds a task (walk, feeding, medication, appointment) for a specific pet with a time, duration, priority, and how often it repeats (once, daily, weekly).
+3. **See today's schedule** – The owner views today's tasks across all pets in time order, with warnings for conflicts, and can mark tasks complete (recurring tasks then roll forward automatically).
+
 **a. Initial design**
 
 - Briefly describe your initial UML design.
