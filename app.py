@@ -50,6 +50,16 @@ if owner.pets:
               for p in owner.pets])
 else:
     st.info("No pets yet. Add one above to start scheduling tasks.")
+    if st.button("Or load sample pets and tasks"):
+        mochi, luna = Pet("Mochi", "dog", 3), Pet("Luna", "cat", 5)
+        owner.add_pet(mochi)
+        owner.add_pet(luna)
+        mochi.add_task(Task("Morning walk", "07:30", 20, "high", "daily"))
+        mochi.add_task(Task("Breakfast", "08:00", 10, "high", "daily"))
+        luna.add_task(Task("Flea medication", "08:00", 5, "high", "weekly"))
+        mochi.add_task(Task("Grooming", "10:00", 40, "low"))
+        luna.add_task(Task("Play session", "18:00", 15, "medium", "daily"))
+        st.rerun()
 
 # --- Schedule a task ----------------------------------------------------------
 if owner.pets:
@@ -72,24 +82,94 @@ if owner.pets:
                 owner.get_pet(target).add_task(task)
                 st.success(f"Scheduled '{task.description}' for {target} at {task.time}.")
 
-# --- Today's tasks ------------------------------------------------------------
+PRIORITY_BADGE = {"high": "🔴 high", "medium": "🟡 medium", "low": "🟢 low"}
+
+
+def task_rows(tasks: list[Task], show_date: bool = False) -> list[dict]:
+    """Turn Task objects into table rows for st.table."""
+    rows = []
+    for t in tasks:
+        row = {"Date": t.due_date.strftime("%a %b %d")} if show_date else {}
+        row.update({"Time": t.time, "Pet": t.pet_name, "Task": t.description,
+                    "Minutes": t.duration_minutes, "Priority": PRIORITY_BADGE[t.priority],
+                    "Repeats": t.frequency, "Done": "✅" if t.completed else "⬜"})
+        rows.append(row)
+    return rows
+
+
+# --- Today's schedule ---------------------------------------------------------
 st.divider()
-st.subheader("📅 Today's tasks")
-todays = scheduler.get_todays_tasks()
+st.subheader("📅 Today's schedule")
+
+# A message saved before st.rerun() so it survives the rerun.
+if "flash" in st.session_state:
+    st.success(st.session_state.pop("flash"))
+
+todays = scheduler.get_todays_tasks()  # already sorted by Scheduler.sort_by_time()
 if not todays:
     st.info("Nothing scheduled for today yet.")
 else:
-    st.table([{"Time": t.time, "Pet": t.pet_name, "Task": t.description,
-               "Minutes": t.duration_minutes, "Priority": t.priority,
-               "Repeats": t.frequency, "Done": "✅" if t.completed else "⬜"}
-              for t in todays])
+    # Conflicts go first so the owner sees them before reading the list.
+    conflicts = scheduler.detect_conflicts()
+    if conflicts:
+        st.warning(
+            f"**{len(conflicts)} scheduling conflict(s)** — you can't be in two places at once. "
+            "Consider moving one of these tasks:\n\n" + "\n".join(f"- {c}" for c in conflicts)
+        )
+    else:
+        st.success("No conflicts — every task has its own time slot.")
+
+    c1, c2 = st.columns(2)
+    pet_filter = c1.selectbox("Show pet", ["All pets"] + [p.name for p in owner.pets])
+    status_filter = c2.radio("Show", ["All", "To do", "Done"], horizontal=True)
+    shown = scheduler.filter_tasks(
+        pet_name=None if pet_filter == "All pets" else pet_filter,
+        completed={"All": None, "To do": False, "Done": True}[status_filter],
+        tasks=todays,
+    )
+    if shown:
+        st.table(task_rows(shown))
+    else:
+        st.caption("No tasks match these filters.")
+
+    done = sum(t.completed for t in todays)
+    st.progress(done / len(todays), text=f"{done} of {len(todays)} tasks done today")
 
     pending = [t for t in todays if not t.completed]
     if pending:
         labels = {f"{t.time} · {t.pet_name} · {t.description}": t for t in pending}
         c1, c2 = st.columns([3, 1])
-        choice = c1.selectbox("Mark a task complete", list(labels), label_visibility="collapsed")
+        choice = c1.selectbox("Mark a task complete", list(labels))
         if c2.button("Mark done"):
             t = labels[choice]
-            scheduler.mark_task_complete(t.pet_name, t.description)
+            result = scheduler.mark_task_complete(t.pet_name, t.description)
+            msg = f"Nice! '{t.description}' for {t.pet_name} is done."
+            if result is not None and result is not t:
+                msg += f" Next {result.frequency} occurrence added for {result.due_date:%a %b %d}."
+            st.session_state.flash = msg
             st.rerun()
+
+# --- Daily plan ---------------------------------------------------------------
+st.divider()
+st.subheader("🧠 Build today's plan")
+st.caption(f"Fits your pending tasks into **{owner.available_minutes} minutes**, "
+           "highest priority first, then lists them in time order.")
+if st.button("Generate plan", type="primary"):
+    planned, skipped = scheduler.generate_plan()
+    reasons = scheduler.explain_plan(planned, skipped)
+    if not planned and not skipped:
+        st.info("Nothing left to plan today. 🎉")
+    else:
+        st.success(reasons[0])
+        if planned:
+            st.table(task_rows(planned))
+        for reason in reasons[1:]:
+            st.warning(reason)
+
+# --- Upcoming -----------------------------------------------------------------
+upcoming = scheduler.sort_by_time(
+    [t for t in owner.get_all_tasks() if t.due_date > dt.date.today() and not t.completed]
+)
+if upcoming:
+    with st.expander(f"🔁 Upcoming ({len(upcoming)}) — includes auto-created recurring tasks"):
+        st.table(task_rows(upcoming, show_date=True))
