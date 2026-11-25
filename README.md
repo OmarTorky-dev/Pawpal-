@@ -47,25 +47,65 @@ pip install -r requirements.txt
 Output of `python main.py`:
 
 ```
-PawPal+ for Jordan (2 pets)
+PawPal+ for Jordan (2 pets, 60 min available)
 
-Today's Schedule
-==============================================================
-  Time   Pet      Task                    Min  Priority Done
-  ----------------------------------------------------------
-  07:30  Mochi    Morning walk             30  high     [ ]
-  08:00  Mochi    Breakfast                10  high     [ ]
-  09:00  Luna     Flea medication           5  high     [ ]
-  18:00  Luna     Play session             15  medium   [ ]
+Tasks in the order they were added
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      08:00  Mochi    Breakfast              10  high     daily   [ ]
+  11-25      07:30  Mochi    Morning walk           20  high     daily   [ ]
+  11-25      10:00  Mochi    Grooming               40  low      once    [ ]
+  11-25      18:00  Luna     Play session           15  medium   daily   [ ]
+  11-25      08:00  Luna     Flea medication         5  high     weekly  [ ]
 
-After completing Mochi's morning walk
-==============================================================
-  Time   Pet      Task                    Min  Priority Done
-  ----------------------------------------------------------
-  07:30  Mochi    Morning walk             30  high     [x]
-  08:00  Mochi    Breakfast                10  high     [ ]
-  09:00  Luna     Flea medication           5  high     [ ]
-  18:00  Luna     Play session             15  medium   [ ]
+Today's Schedule (sorted by time)
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      07:30  Mochi    Morning walk           20  high     daily   [ ]
+  11-25      08:00  Mochi    Breakfast              10  high     daily   [ ]
+  11-25      08:00  Luna     Flea medication         5  high     weekly  [ ]
+  11-25      10:00  Mochi    Grooming               40  low      once    [ ]
+  11-25      18:00  Luna     Play session           15  medium   daily   [ ]
+
+Conflict check
+======================================================================
+  Conflict (same time): Mochi's 'Breakfast' (08:00, 10 min) and Luna's 'Flea medication' (08:00, 5 min)
+
+Filter: Luna's tasks only
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      08:00  Luna     Flea medication         5  high     weekly  [ ]
+  11-25      18:00  Luna     Play session           15  medium   daily   [ ]
+
+Completed Mochi's daily 'Morning walk' -> next one auto-created for 2026-11-26
+
+Filter: completed tasks
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      07:30  Mochi    Morning walk           20  high     daily   [x]
+
+Mochi's tasks (note tomorrow's walk)
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      07:30  Mochi    Morning walk           20  high     daily   [x]
+  11-25      08:00  Mochi    Breakfast              10  high     daily   [ ]
+  11-25      10:00  Mochi    Grooming               40  low      once    [ ]
+  11-26      07:30  Mochi    Morning walk           20  high     daily   [ ]
+
+Today's Plan (fits in 60 min)
+======================================================================
+  Due        Time   Pet      Task                  Min  Priority Repeats Done
+  ------------------------------------------------------------------
+  11-25      08:00  Luna     Flea medication         5  high     weekly  [ ]
+  11-25      08:00  Mochi    Breakfast              10  high     daily   [ ]
+  11-25      18:00  Luna     Play session           15  medium   daily   [ ]
+  * Planned 3 task(s) using 30 of 60 available minutes.
+  * Skipped 'Grooming' for Mochi (40 min, low priority): not enough time left after higher-priority tasks.
 ```
 
 ## 🧪 Testing PawPal+
@@ -86,14 +126,16 @@ Sample test output:
 
 ## 📐 Smarter Scheduling
 
-> Fill in once you've implemented scheduling logic.
+All scheduling logic lives in `Scheduler` (and `Task`) in `pawpal_system.py`.
 
-| Feature | Method(s) | Notes |
+| Feature | Method(s) | How it works |
 |---------|-----------|-------|
-| Task sorting | | e.g., by priority, duration |
-| Filtering | | e.g., skip tasks if time runs out |
-| Conflict handling | | e.g., overlapping time slots |
-| Recurring tasks | | e.g., daily vs. weekly |
+| Task sorting | `Scheduler.sort_by_time()` | `sorted()` with a `lambda` key of `(due_date, time, priority rank)`. Times are normalized to zero-padded `"HH:MM"` in `Task.__post_init__`, so string order equals chronological order (`"9:00"` becomes `"09:00"`). Ties at the same time put high priority first. |
+| Today's view | `Scheduler.get_todays_tasks()` | Tasks due today plus *unfinished* overdue tasks, sorted by time. Completed tasks from past days drop off. |
+| Filtering | `Scheduler.filter_tasks(pet_name=, completed=)` | Filter by pet (case-insensitive), by completion status, or both. A filter left as `None` is ignored. |
+| Conflict detection | `Scheduler.detect_conflicts()` | Compares every pair of pending same-day tasks and flags any whose time windows overlap (start + duration), labelled "same time" or "overlap". Works across pets, since the owner can't be in two places at once. Returns warning strings; never raises. |
+| Recurring tasks | `Task.next_occurrence()`, `Scheduler.mark_task_complete()` | Completing a `daily`/`weekly` task automatically adds a fresh copy due `+ timedelta(days=1)` / `+ timedelta(weeks=1)` to the same pet. `once` tasks just complete. |
+| Daily plan | `Scheduler.generate_plan()`, `Scheduler.explain_plan()` | Greedy fit to `Owner.available_minutes`: high priority first (shorter first within a priority), keep what fits, return `(planned, skipped)` with the plan in time order, plus plain-English reasons for each skip. |
 
 ## 📸 Demo Walkthrough
 

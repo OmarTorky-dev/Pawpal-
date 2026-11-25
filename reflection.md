@@ -34,13 +34,22 @@ One suggestion I did *not* take: making `Task` hold a full reference to its `Pet
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers four constraints:
+
+- **Time of day** – every task has an `"HH:MM"` start time, and the day is shown in chronological order.
+- **Duration + the owner's available minutes** – `generate_plan()` only keeps tasks that fit into `Owner.available_minutes`.
+- **Priority** – high-priority tasks get the time budget first and win ties when two tasks share a start time.
+- **Due date / recurrence** – only tasks due today (or unfinished and overdue) show up, and daily/weekly tasks roll forward when completed.
+
+I treated **priority as the most important constraint** because the cost of skipping a task isn't equal: missing a medication or a meal matters far more than skipping grooming. Time of day comes second — it decides the *order* of the day, but not *whether* something happens. Owner preferences (like "no walks after 9pm") were left out to keep the first version simple.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+**Conflict detection only warns; it never reschedules.** `detect_conflicts()` checks every pair of pending same-day tasks and reports any whose windows overlap (start time + duration), but it leaves fixing them to the owner. An automatic rescheduler would have to guess which task to move and where, and could silently push a medication to a time the vet didn't recommend. A warning is reasonable here because the owner knows things the app doesn't — feeding the cat while the dog eats might be perfectly fine, so a hard block would be wrong too.
+
+A second, smaller tradeoff: the planner is **greedy** (highest priority first, shorter first within a priority) instead of finding the mathematically best combination of tasks for the time budget. With 5–10 tasks a day, greedy is easy to explain to the user ("Grooming was skipped because higher-priority tasks used the time"), which matters more than squeezing in one extra low-priority task.
+
+**Readability vs. "Pythonic":** when I asked the AI to simplify `detect_conflicts()`, it offered a single list comprehension over `itertools.combinations`. It was shorter, but the overlap condition and the "same time" vs. "overlap" label were buried inside one expression, so I kept the explicit loop (while still using `combinations` to avoid a hand-written nested index loop).
 
 ---
 
