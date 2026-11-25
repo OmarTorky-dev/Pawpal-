@@ -123,7 +123,7 @@ def test_completing_daily_task_creates_next_day_task(household):
     _, mochi, _, scheduler = household
     mochi.add_task(Task("Walk", "07:30", frequency="daily", due_date=TODAY))
 
-    nxt = scheduler.mark_task_complete("Mochi", "Walk")
+    nxt = scheduler.mark_task_complete("Mochi", "Walk", today=TODAY)
 
     assert len(mochi.tasks) == 2
     original, new = mochi.tasks
@@ -137,14 +137,14 @@ def test_completing_daily_task_creates_next_day_task(household):
 def test_completing_weekly_task_creates_task_one_week_later(household):
     _, _, luna, scheduler = household
     luna.add_task(Task("Flea meds", "09:00", frequency="weekly", due_date=TODAY))
-    nxt = scheduler.mark_task_complete("Luna", "Flea meds")
+    nxt = scheduler.mark_task_complete("Luna", "Flea meds", today=TODAY)
     assert nxt.due_date == TODAY + timedelta(weeks=1)
 
 
 def test_completing_one_off_task_does_not_recur(household):
     _, mochi, _, scheduler = household
     mochi.add_task(Task("Vet visit", "14:00", frequency="once", due_date=TODAY))
-    done = scheduler.mark_task_complete("Mochi", "Vet visit")
+    done = scheduler.mark_task_complete("Mochi", "Vet visit", today=TODAY)
     assert done.completed is True
     assert len(mochi.tasks) == 1
 
@@ -161,8 +161,8 @@ def test_daily_recurrence_crosses_calendar_boundaries(start, expected):
 def test_completing_twice_rolls_forward_again(household):
     _, mochi, _, scheduler = household
     mochi.add_task(Task("Walk", "07:30", frequency="daily", due_date=TODAY))
-    scheduler.mark_task_complete("Mochi", "Walk")
-    second = scheduler.mark_task_complete("Mochi", "Walk")
+    scheduler.mark_task_complete("Mochi", "Walk", today=TODAY)
+    second = scheduler.mark_task_complete("Mochi", "Walk", today=TODAY)
     assert second.due_date == TODAY + timedelta(days=2)
     assert len(mochi.tasks) == 3
 
@@ -170,8 +170,36 @@ def test_completing_twice_rolls_forward_again(household):
 def test_mark_complete_unknown_pet_or_task_returns_none(household):
     _, mochi, _, scheduler = household
     mochi.add_task(Task("Walk", "07:30", due_date=TODAY))
-    assert scheduler.mark_task_complete("Rex", "Walk") is None
-    assert scheduler.mark_task_complete("Mochi", "Swim") is None
+    assert scheduler.mark_task_complete("Rex", "Walk", today=TODAY) is None
+    assert scheduler.mark_task_complete("Mochi", "Swim", today=TODAY) is None
+
+
+def test_overdue_daily_task_recurs_tomorrow_not_in_the_past(household):
+    _, mochi, _, scheduler = household
+    mochi.add_task(Task("Walk", "07:30", frequency="daily", due_date=TODAY - timedelta(days=3)))
+    nxt = scheduler.mark_task_complete("Mochi", "Walk", today=TODAY)
+    assert nxt.due_date == TODAY + timedelta(days=1)
+
+
+def test_overdue_weekly_task_keeps_its_weekday(household):
+    _, _, luna, scheduler = household
+    due = TODAY - timedelta(days=3)                       # e.g. a Saturday, done the next Tuesday
+    luna.add_task(Task("Flea meds", "09:00", frequency="weekly", due_date=due))
+    nxt = scheduler.mark_task_complete("Luna", "Flea meds", today=TODAY)
+    assert nxt.due_date == due + timedelta(weeks=1)       # next Saturday, after today
+    assert nxt.due_date > TODAY and nxt.due_date.weekday() == due.weekday()
+
+
+def test_weekly_task_overdue_more_than_a_week_skips_missed_weeks():
+    due = TODAY - timedelta(days=10)
+    nxt = Task("Flea meds", "09:00", frequency="weekly", due_date=due).next_occurrence(completed_on=TODAY)
+    assert nxt.due_date == due + timedelta(weeks=2)
+
+
+def test_completing_early_schedules_from_due_date():
+    due = TODAY + timedelta(days=2)
+    nxt = Task("Walk", "07:00", frequency="daily", due_date=due).next_occurrence(completed_on=TODAY)
+    assert nxt.due_date == due + timedelta(days=1)
 
 
 # --- Conflict detection -------------------------------------------------------
@@ -214,6 +242,35 @@ def test_same_time_on_different_days_is_not_a_conflict(household):
     for t in tasks:
         mochi.add_task(t)
     assert scheduler.detect_conflicts(tasks) == []
+
+
+def test_task_running_past_midnight_conflicts_with_next_morning(household):
+    _, mochi, luna, scheduler = household
+    mochi.add_task(Task("Night walk", "23:30", 60, due_date=TODAY))                       # ends 00:30
+    luna.add_task(Task("Early meds", "00:15", 5, due_date=TODAY + timedelta(days=1)))
+    warnings = scheduler.detect_conflicts()
+    assert len(warnings) == 1
+    assert "Night walk" in warnings[0] and "Early meds" in warnings[0]
+
+
+def test_task_ending_at_midnight_does_not_conflict_with_midnight_task(household):
+    _, mochi, _, scheduler = household
+    mochi.add_task(Task("Late play", "23:30", 30, due_date=TODAY))                        # ends 00:00
+    mochi.add_task(Task("Midnight snack", "00:00", 5, due_date=TODAY + timedelta(days=1)))
+    assert scheduler.detect_conflicts() == []
+
+
+def test_long_task_conflicts_with_every_task_it_covers(household):
+    # Guards the early-exit loop: A overlaps both B and C, but B and C don't overlap each other.
+    _, mochi, luna, scheduler = household
+    mochi.add_task(Task("A long hike", "08:00", 120, due_date=TODAY))
+    luna.add_task(Task("B feed", "08:30", 10, due_date=TODAY))
+    luna.add_task(Task("C meds", "09:00", 10, due_date=TODAY))
+    luna.add_task(Task("D play", "11:00", 10, due_date=TODAY))                            # after hike ends
+    warnings = scheduler.detect_conflicts()
+    assert len(warnings) == 2
+    assert all("A long hike" in w for w in warnings)
+    assert not any("D play" in w for w in warnings)
 
 
 def test_no_tasks_means_no_conflicts(household):

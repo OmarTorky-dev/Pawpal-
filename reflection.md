@@ -45,11 +45,11 @@ I treated **priority as the most important constraint** because the cost of skip
 
 **b. Tradeoffs**
 
-**Conflict detection only warns; it never reschedules.** `detect_conflicts()` checks every pair of pending same-day tasks and reports any whose windows overlap (start time + duration), but it leaves fixing them to the owner. An automatic rescheduler would have to guess which task to move and where, and could silently push a medication to a time the vet didn't recommend. A warning is reasonable here because the owner knows things the app doesn't — feeding the cat while the dog eats might be perfectly fine, so a hard block would be wrong too.
+**Conflict detection only warns; it never reschedules.** `detect_conflicts()` reports any pending tasks whose windows overlap (real start/end datetimes, so it also catches a late-night task running into the next morning), but it leaves fixing them to the owner. An automatic rescheduler would have to guess which task to move and where, and could silently push a medication to a time the vet didn't recommend. A warning is reasonable here because the owner knows things the app doesn't — feeding the cat while the dog eats might be perfectly fine, so a hard block would be wrong too.
 
 A second, smaller tradeoff: the planner is **greedy** (highest priority first, shorter first within a priority) instead of finding the mathematically best combination of tasks for the time budget. With 5–10 tasks a day, greedy is easy to explain to the user ("Grooming was skipped because higher-priority tasks used the time"), which matters more than squeezing in one extra low-priority task.
 
-**Readability vs. "Pythonic":** when I asked the AI to simplify `detect_conflicts()`, it offered a single list comprehension over `itertools.combinations`. It was shorter, but the overlap condition and the "same time" vs. "overlap" label were buried inside one expression, so I kept the explicit loop (while still using `combinations` to avoid a hand-written nested index loop).
+**Readability vs. "Pythonic":** when I asked the AI to simplify `detect_conflicts()`, it offered a single list comprehension over `itertools.combinations`. It was shorter, but the overlap condition and the "same time" vs. "overlap" label were buried inside one expression, so I kept an explicit loop. Later, when I fixed the midnight bug, I switched from checking every pair with `itertools.combinations` to a sorted scan that `break`s as soon as a later task starts after the current one ends. That's both faster and, with a one-line comment, still easy to follow.
 
 ---
 
@@ -71,19 +71,20 @@ A second, smaller tradeoff: the planner is **greedy** (highest priority first, s
 
 **a. What you tested**
 
-The suite (38 tests) covers: task completion and addition, input validation, sorting (including the `"9:00"` vs `"10:00"` string trap and priority tie-breaks), recurrence (daily/weekly, one-off tasks, month/year/leap-day boundaries), conflict detection (exact matches, overlapping durations, back-to-back tasks that should *not* conflict, completed tasks, different days), filtering, "today" view with overdue tasks, and plan generation within a time budget.
+The suite (45 tests) covers: task completion and addition, input validation, sorting (including the `"9:00"` vs `"10:00"` string trap and priority tie-breaks), recurrence (daily/weekly, one-off tasks, month/year/leap-day boundaries, overdue and early completions), conflict detection (exact matches, overlapping durations, back-to-back tasks that should *not* conflict, completed tasks, different days, tasks running past midnight), filtering, "today" view with overdue tasks, and plan generation within a time budget.
 
 These mattered because they're the behaviors an owner relies on without double-checking: if recurrence silently stopped creating tomorrow's medication, or sorting put 10:00 before 9:00, the app would look fine but give wrong advice. The boundary tests (back-to-back tasks, Dec 31 → Jan 1) are where off-by-one bugs usually hide.
 
 **b. Confidence**
 
-About **4 out of 5**. All 38 tests pass, and I checked that the tests have teeth by deliberately breaking the conflict boundary, the recurrence date math, and the sort key — each broke the matching tests. I'm holding back one point because the Streamlit UI is only smoke-tested.
+About **4 out of 5**. All 45 tests pass, and I checked that the tests have teeth by deliberately breaking the conflict boundary, the recurrence date math, the sort key, the overdue catch-up loop, and cross-midnight detection — each broke the matching tests.
+
+Writing this list of edge cases actually exposed two real bugs, which I then fixed: tasks running past midnight couldn't conflict with next-morning tasks (conflict detection only compared times within one day), and completing an overdue recurring task created a "next" task that was still in the past. Both now have tests. I'm holding back one point because the Streamlit UI is only smoke-tested.
 
 Next edge cases I'd test:
-- Tasks that cross midnight (e.g. 23:30 for 60 minutes) — currently they can't conflict with a 00:15 task the next day.
 - Two pending tasks with the same description for the same pet (which one does `mark_task_complete` pick?).
-- Completing a recurring task that's several days overdue — right now the next occurrence is based on the old due date, so it may still be in the past.
-- Very large numbers of tasks, to confirm the O(n²) conflict check stays fast enough.
+- Daylight-saving transitions, where a day is 23 or 25 hours long.
+- Very large numbers of overlapping tasks (worst case for the conflict scan, since it can't stop early).
 
 ---
 

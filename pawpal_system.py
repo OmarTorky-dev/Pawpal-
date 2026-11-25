@@ -3,19 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
-from itertools import combinations
+from datetime import date, datetime, timedelta
 
 VALID_PRIORITIES = ("low", "medium", "high")
 VALID_FREQUENCIES = ("once", "daily", "weekly")
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2}
 RECURRENCE_STEP = {"daily": timedelta(days=1), "weekly": timedelta(weeks=1)}
-
-
-def to_minutes(hhmm: str) -> int:
-    """Convert an "HH:MM" string to minutes after midnight."""
-    hours, minutes = hhmm.split(":")
-    return int(hours) * 60 + int(minutes)
 
 
 @dataclass
@@ -55,19 +48,31 @@ class Task:
         self.completed = True
 
     @property
-    def end_minutes(self) -> int:
-        """Minutes after midnight when this task ends."""
-        return to_minutes(self.time) + self.duration_minutes
+    def start(self) -> datetime:
+        """The exact date and time this task begins."""
+        return datetime.combine(self.due_date, datetime.strptime(self.time, "%H:%M").time())
 
-    def next_occurrence(self) -> Task | None:
-        """Return a fresh, incomplete copy due one day/week later, or None for one-off tasks.
+    @property
+    def end(self) -> datetime:
+        """The exact date and time this task ends (may fall on the next day)."""
+        return self.start + timedelta(minutes=self.duration_minutes)
 
+    def next_occurrence(self, completed_on: date | None = None) -> Task | None:
+        """Return a fresh, incomplete copy for the next cycle, or None for one-off tasks.
+
+        Steps forward one day/week from the due date, repeating until the new date is after
+        `completed_on` (defaults to the due date, i.e. done on time). So an overdue daily task
+        comes back tomorrow rather than in the past, and a weekly task keeps its weekday.
         Uses timedelta so month and year boundaries (e.g. Jan 31 -> Feb 1) are handled correctly.
         """
         step = RECURRENCE_STEP.get(self.frequency)
         if step is None:
             return None
-        return replace(self, due_date=self.due_date + step, completed=False)
+        completed_on = completed_on or self.due_date
+        next_due = self.due_date + step
+        while next_due <= completed_on:
+            next_due += step
+        return replace(self, due_date=next_due, completed=False)
 
 
 @dataclass
@@ -168,33 +173,37 @@ class Scheduler:
         ]
 
     def detect_conflicts(self, tasks: list[Task] | None = None) -> list[str]:
-        """Return a warning for every pair of pending, same-day tasks whose time windows overlap.
+        """Return a warning for every pair of pending tasks whose time windows overlap.
 
-        Lightweight by design: it never raises or reschedules, it only reports. Checks every
-        pair (O(n^2)), which is fine for the handful of tasks a household has per day.
+        Compares real start/end datetimes, so a late-night task that runs past midnight can
+        clash with an early task the next day. Defaults to all of the owner's pending tasks.
+        Lightweight by design: it never raises or reschedules, it only reports.
         """
-        tasks = self.get_todays_tasks() if tasks is None else tasks
+        tasks = self.owner.get_all_tasks() if tasks is None else tasks
         pending = self.sort_by_time([t for t in tasks if not t.completed])
         warnings = []
-        for a, b in combinations(pending, 2):
-            if a.due_date != b.due_date:
-                continue
-            if to_minutes(b.time) < a.end_minutes:  # b starts before a finishes
-                kind = "same time" if a.time == b.time else "overlap"
+        for i, a in enumerate(pending):
+            for b in pending[i + 1:]:
+                if b.start >= a.end:
+                    break  # sorted by start, so no later task can overlap `a` either
+                kind = "same time" if a.start == b.start else "overlap"
                 warnings.append(
                     f"Conflict ({kind}): {a.pet_name}'s '{a.description}' "
-                    f"({a.time}, {a.duration_minutes} min) and {b.pet_name}'s "
-                    f"'{b.description}' ({b.time}, {b.duration_minutes} min)"
+                    f"({a.start:%a %H:%M}, {a.duration_minutes} min) and {b.pet_name}'s "
+                    f"'{b.description}' ({b.start:%a %H:%M}, {b.duration_minutes} min)"
                 )
         return warnings
 
-    def mark_task_complete(self, pet_name: str, description: str) -> Task | None:
+    def mark_task_complete(
+        self, pet_name: str, description: str, today: date | None = None
+    ) -> Task | None:
         """Complete a pet's earliest pending task with this description.
 
-        If the task repeats, its next occurrence is added to the same pet automatically.
-        Returns the new occurrence for recurring tasks, the completed task otherwise,
-        or None if no matching pending task exists.
+        If the task repeats, its next occurrence (after `today`) is added to the same pet
+        automatically. Returns the new occurrence for recurring tasks, the completed task
+        otherwise, or None if no matching pending task exists.
         """
+        today = today or date.today()
         pet = self.owner.get_pet(pet_name)
         if pet is None:
             return None
@@ -203,7 +212,7 @@ class Scheduler:
             return None
         task = min(matches, key=lambda t: (t.due_date, t.time))
         task.mark_complete()
-        upcoming = task.next_occurrence()
+        upcoming = task.next_occurrence(completed_on=today)
         if upcoming is not None:
             pet.add_task(upcoming)
             return upcoming

@@ -71,7 +71,7 @@ Today's Schedule (sorted by time)
 
 Conflict check
 ======================================================================
-  Conflict (same time): Mochi's 'Breakfast' (08:00, 10 min) and Luna's 'Flea medication' (08:00, 5 min)
+  Conflict (same time): Mochi's 'Breakfast' (Wed 08:00, 10 min) and Luna's 'Flea medication' (Wed 08:00, 5 min)
 
 Filter: Luna's tasks only
 ======================================================================
@@ -116,19 +116,19 @@ Run the full suite from the project root:
 python -m pytest
 ```
 
-`tests/test_pawpal.py` contains **38 tests** covering both happy paths and edge cases:
+`tests/test_pawpal.py` contains **45 tests** covering both happy paths and edge cases:
 
 | Area | What's verified |
 |------|-----------------|
 | Basics | `mark_complete()` flips status; `add_task()` grows a pet's list and tags the pet name; removing tasks; owners aggregate tasks across pets; duplicate pet names are rejected |
 | Validation | Times normalize to `HH:MM` (`"7:05"` → `"07:05"`); bad times (`"25:00"`, `"noon"`, `""`), priorities, frequencies and zero durations raise `ValueError` |
 | Sorting | Out-of-order tasks come back chronologically; `"9:00"` sorts before `"10:00"`; ties broken by priority; tomorrow sorts after today; empty list |
-| Recurrence | Completing a daily task creates one for the next day (weekly → +7 days); one-off tasks don't recur; month, year and leap-day boundaries; completing twice rolls forward twice; unknown pet/task returns `None` |
-| Conflicts | Exact same time is flagged; overlapping durations are flagged; back-to-back tasks are *not*; completed tasks and tasks on different days are ignored; no tasks → no warnings |
+| Recurrence | Completing a daily task creates one for the next day (weekly → +7 days); one-off tasks don't recur; month, year and leap-day boundaries; completing twice rolls forward twice; overdue tasks come back *after* today (weekly keeps its weekday, missed weeks are skipped); completing early; unknown pet/task returns `None` |
+| Conflicts | Exact same time is flagged; overlapping durations are flagged; back-to-back tasks are *not*; completed tasks and tasks on different days are ignored; a 23:30 task running past midnight clashes with a 00:15 task the next day, but one ending exactly at 00:00 doesn't; a long task is flagged against every task it covers; no tasks → no warnings |
 | Filtering / today | Pet filter is case-insensitive; status filter and combined filters; a pet with no tasks; overdue pending tasks show today, old completed ones don't |
 | Planning | Plan stays within the time budget and prefers high priority; explanations mention skipped tasks; empty day and zero-minute budget |
 
-To check the tests actually catch bugs (not just pass), I temporarily broke three pieces of logic — conflict boundary (`<` → `<=`), recurrence date (no `+ timedelta`), and the sort key — and each change made the relevant tests fail.
+To check the tests actually catch bugs (not just pass), I temporarily broke three pieces of logic — conflict boundary (`<` → `<=`), recurrence date (no `+ timedelta`), the sort key, the overdue catch-up loop, and cross-midnight detection — and each change made the relevant tests fail.
 
 Sample test output:
 
@@ -137,14 +137,14 @@ Sample test output:
 platform win32 -- Python 3.15.2, pytest-9.2.0, pluggy-1.7.0
 rootdir: C:\Users\omart\OneDrive\Desktop\Pawpal-\ai110-module2show-pawpal-starter
 plugins: anyio-4.16.0
-collected 38 items
+collected 45 items
 
-tests\test_pawpal.py ......................................              [100%]
+tests\test_pawpal.py .............................................       [100%]
 
-============================= 38 passed in 0.09s ==============================
+============================= 45 passed in 0.12s ==============================
 ```
 
-**Confidence level: ★★★★☆ (4/5)** — every core scheduling behavior and the edge cases I could think of are covered and passing, and the suite catches deliberately injected bugs. One star held back because the Streamlit UI is only checked manually / with a smoke test, and real-world inputs like time zones or tasks that cross midnight aren't handled yet.
+**Confidence level: ★★★★☆ (4/5)** — every core scheduling behavior and the edge cases I could think of are covered and passing, and the suite catches deliberately injected bugs. One star held back because the Streamlit UI is only checked manually / with a smoke test, and real-world inputs like time zones or daylight-saving changes aren't handled yet.
 
 ## 📐 Smarter Scheduling
 
@@ -155,8 +155,8 @@ All scheduling logic lives in `Scheduler` (and `Task`) in `pawpal_system.py`.
 | Task sorting | `Scheduler.sort_by_time()` | `sorted()` with a `lambda` key of `(due_date, time, priority rank)`. Times are normalized to zero-padded `"HH:MM"` in `Task.__post_init__`, so string order equals chronological order (`"9:00"` becomes `"09:00"`). Ties at the same time put high priority first. |
 | Today's view | `Scheduler.get_todays_tasks()` | Tasks due today plus *unfinished* overdue tasks, sorted by time. Completed tasks from past days drop off. |
 | Filtering | `Scheduler.filter_tasks(pet_name=, completed=)` | Filter by pet (case-insensitive), by completion status, or both. A filter left as `None` is ignored. |
-| Conflict detection | `Scheduler.detect_conflicts()` | Compares every pair of pending same-day tasks and flags any whose time windows overlap (start + duration), labelled "same time" or "overlap". Works across pets, since the owner can't be in two places at once. Returns warning strings; never raises. |
-| Recurring tasks | `Task.next_occurrence()`, `Scheduler.mark_task_complete()` | Completing a `daily`/`weekly` task automatically adds a fresh copy due `+ timedelta(days=1)` / `+ timedelta(weeks=1)` to the same pet. `once` tasks just complete. |
+| Conflict detection | `Scheduler.detect_conflicts()` | Builds real start/end `datetime`s (due date + time + duration), sorts pending tasks by start, and flags any pair whose windows overlap, labelled "same time" or "overlap". Because it uses full datetimes, a 23:30 task lasting an hour clashes with a 00:15 task the next day. The scan stops early for each task once later tasks start after it ends. Works across pets, since the owner can't be in two places at once. Returns warning strings; never raises. |
+| Recurring tasks | `Task.next_occurrence()`, `Scheduler.mark_task_complete()` | Completing a `daily`/`weekly` task automatically adds a fresh copy due `+ timedelta(days=1)` / `+ timedelta(weeks=1)` to the same pet. If the task was overdue, it keeps stepping forward until the new date is after today, so a missed daily walk comes back tomorrow and weekly meds keep their weekday. `once` tasks just complete. |
 | Daily plan | `Scheduler.generate_plan()`, `Scheduler.explain_plan()` | Greedy fit to `Owner.available_minutes`: high priority first (shorter first within a priority), keep what fits, return `(planned, skipped)` with the plan in time order, plus plain-English reasons for each skip. |
 
 ## 📸 Demo Walkthrough
