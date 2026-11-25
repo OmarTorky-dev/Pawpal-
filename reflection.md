@@ -57,13 +57,25 @@ A second, smaller tradeoff: the planner is **greedy** (highest priority first, s
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used Claude Code (agent mode inside VS Code) for the whole build: brainstorming the four classes and drafting the Mermaid UML, generating the dataclass skeleton, implementing each phase, writing tests, debugging, and drafting documentation.
+
+**Most effective features:**
+- **Agent mode with multi-file edits** – recurrence touched `Task`, `Scheduler`, `main.py`, the tests and the README at once; having the agent edit them together kept everything consistent.
+- **Running code, not just writing it** – the agent ran `python main.py`, `python -m pytest`, and even drove the Streamlit app headlessly with `AppTest` after every change, so bugs showed up immediately (for example, it noticed tomorrow's recurring walk sorting in among today's tasks because the sort ignored the date).
+- **Review-style prompts** – asking "what relationships are missing / where are the bottlenecks?" about the skeleton produced the two most useful design changes (`Task.pet_name` and time normalization).
+
+**Most helpful prompts:** specific, checkable questions — "Why is this failing, and is the bug in my test or my logic?", "What edge cases matter for sorting and recurring tasks?", and "How could this be simplified?" — worked far better than "make it better."
+
+**Staying organized:** instead of separate chat sessions per phase, I worked phase-by-phase with an explicit **checkpoint after every phase**, where the AI stopped, summarized what changed, and waited for my go-ahead. That gave the same benefit separate sessions would — each phase had a clear scope and a clean commit — while keeping the design context, so later phases didn't contradict earlier decisions.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+A few AI suggestions I rejected or modified:
+- **Shorter but less readable code.** The AI offered a one-expression list comprehension for `detect_conflicts()`. I kept an explicit loop because the overlap rule and the "same time"/"overlap" label were hidden inside the one-liner.
+- **Circular references.** Giving each `Task` a reference to its whole `Pet` object was an option; I kept just `pet_name` to avoid a Pet → Task → Pet cycle.
+- **Deferring known bugs.** At the end of testing, the AI listed two gaps — tasks crossing midnight couldn't conflict, and completing an overdue recurring task created a "next" task in the past — and proposed leaving them as future work. I decided to fix them right away instead, since both would give an owner wrong information.
+
+How I verified: every change was checked by running the demo and the test suite, not by reading the code and trusting it. For the test suite specifically, I didn't just accept "all tests pass" — we deliberately broke the logic (flipping `<` to `<=` in the conflict check, removing the recurrence `timedelta`, simplifying the sort key, removing the overdue catch-up loop) and confirmed the right tests failed each time.
 
 ---
 
@@ -92,12 +104,15 @@ Next edge cases I'd test:
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+I'm most satisfied with the scheduling logic and its test suite. The `Scheduler` reads live data through the `Owner` instead of copying it, so the CLI demo, the tests and the Streamlit app all use exactly the same logic. The 45 tests cover real edge cases (back-to-back tasks, midnight, leap day, overdue recurring tasks), and I know they work because they caught every bug we planted.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+- **Persistence** – data lives in `st.session_state`, so it disappears when the browser tab closes. Saving to a JSON file or SQLite would make it actually usable day to day.
+- **Editing tasks and stable IDs** – tasks are found by pet + description, so two tasks with the same name for the same pet are ambiguous. A task ID would fix that and make "edit" and "delete" in the UI straightforward.
+- **Smarter planning** – the plan is greedy and only warns about conflicts. A next version could suggest a free time slot for a conflicting task, and support owner preferences (e.g. "no walks after 9 pm").
+- **Time zones / daylight saving** – times are naive local times, which is fine for one household but not for travel.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+Being the "lead architect" with a powerful AI means owning the **decisions and the verification**, not the typing. The AI could produce a whole working class in seconds, but it was my job to keep the design small (four classes, clear responsibilities), decide which suggestions fit, and insist on evidence — a passing demo, passing tests, and tests that fail when the code is wrong. The most valuable moments weren't when the AI wrote code; they were when a pointed question ("what edge cases would break this?") surfaced a real bug that I then chose to fix rather than defer.
